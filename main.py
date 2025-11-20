@@ -24,7 +24,12 @@ def format_report(report) -> str:
         )
         if tf.support is not None and tf.resistance is not None:
             lines.append(f"  支撑: {tf.support:.2f} | 阻力: {tf.resistance:.2f}")
+        if tf.fib_levels:
+            fib_text = ", ".join([f"{k}:{v:.2f}" for k, v in tf.fib_levels.items()])
+            lines.append(f"  斐波位: {fib_text}")
         lines.append(f"  建议: {tf.suggestion}")
+        if tf.llm_note:
+            lines.append(f"  GPT补充: {tf.llm_note}")
     return "\n".join(lines)
 
 

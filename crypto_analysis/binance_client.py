@@ -1,5 +1,4 @@
-import datetime as dt
-from typing import List
+from typing import List, Optional, Union
 
 import pandas as pd
 import requests
@@ -15,7 +14,7 @@ INTERVALS = {
 
 
 class BinanceClient:
-    def __init__(self, session: requests.Session | None = None) -> None:
+    def __init__(self, session: Optional[requests.Session] = None) -> None:
         self.session = session or requests.Session()
 
     def fetch_klines(self, symbol: str, interval: str, limit: int = 200) -> pd.DataFrame:
@@ -25,7 +24,7 @@ class BinanceClient:
         params = {"symbol": symbol.upper(), "interval": INTERVALS[interval], "limit": limit}
         response = self.session.get(BASE_URL, params=params, timeout=10)
         response.raise_for_status()
-        data: List[List[str | float | int]] = response.json()
+        data: List[List[Union[str, float, int]]] = response.json()
 
         df = pd.DataFrame(
             data,
