@@ -50,6 +50,14 @@ class BinanceClient:
         df[numeric_cols] = df[numeric_cols].astype(float)
         df["open_time"] = pd.to_datetime(df["open_time"], unit="ms", utc=True)
         df["close_time"] = pd.to_datetime(df["close_time"], unit="ms", utc=True)
+
+        # Binance futures klines include the currently-forming candle; drop any kline whose
+        # close_time is still in the future to ensure we only analyze closed candles.
+        now_utc = pd.Timestamp.utcnow().tz_localize("UTC")
+        df = df[df["close_time"] <= now_utc]
+        if df.empty:
+            raise ValueError("No closed klines returned; please retry with a larger limit or later time.")
+
         return df[["open_time", "open", "high", "low", "close", "volume", "close_time"]]
 
     def fetch_latest_close(self, symbol: str, interval: str) -> float:
