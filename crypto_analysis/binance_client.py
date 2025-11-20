@@ -3,13 +3,14 @@ from typing import List, Optional, Union
 import pandas as pd
 import requests
 
-BASE_URL = "https://api.binance.com/api/v3/klines"
+BASE_URL = "https://fapi.binance.com/fapi/v1/klines"
 
 
 INTERVALS = {
     "1d": "1d",
     "4h": "4h",
     "1h": "1h",
+    "15m": "15m",
 }
 
 
