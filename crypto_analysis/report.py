@@ -1,6 +1,7 @@
 import importlib.util
 import os
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any, Dict, List, Optional, Union
 
 import pandas as pd
@@ -34,6 +35,7 @@ class TimeframeReport:
     interval: str
     close: float
     close_time: pd.Timestamp
+    close_time_local: str
     mark_price: Optional[float]
     ema20: float
     ema50: float
@@ -113,6 +115,8 @@ class Analyzer:
         last_row = df.iloc[-1]
         price = float(last_row["close"])
         close_time = pd.to_datetime(last_row["close_time"])
+        local_tz = datetime.now().astimezone().tzinfo
+        close_time_local = close_time.tz_convert(local_tz).isoformat()
         ema20_val = float(ema20.iloc[-1])
         ema50_val = float(ema50.iloc[-1])
         ema200_val = float(ema200.iloc[-1])
@@ -189,6 +193,7 @@ class Analyzer:
             interval=interval,
             close=price,
             close_time=close_time,
+            close_time_local=close_time_local,
             mark_price=mark_price,
             ema20=ema20_val,
             ema50=ema50_val,
@@ -410,7 +415,7 @@ class Analyzer:
             patterns = ",".join(tf.patterns) if tf.patterns else "无"
             lines.append(
                 (
-                    f"\n[周期 {tf.interval}] 收盘:{tf.close:.2f} (K线UTC:{tf.close_time}) 标记价:{tf.mark_price} 趋势:{tf.trend}"
+                    f"\n[周期 {tf.interval}] 收盘:{tf.close:.2f} (K线UTC:{tf.close_time}, 本地:{tf.close_time_local}) 标记价:{tf.mark_price} 趋势:{tf.trend}"
                     f" | EMA20/50/200:{tf.ema20:.2f}/{tf.ema50:.2f}/{tf.ema200:.2f}"
                     f" | SMA20/50:{tf.sma20} / {tf.sma50}"
                     f" | MACD:{tf.macd:.4f}/{tf.macd_signal:.4f}/{tf.macd_histogram:.4f}"
@@ -433,6 +438,7 @@ def build_summary(reports: List[SymbolReport]) -> Dict[str, Dict[str, Dict[str, 
             symbol_entry[tf.interval] = {
                 "close": tf.close,
                 "close_time": tf.close_time.isoformat(),
+                "close_time_local": tf.close_time_local,
                 "mark_price": report.mark_price,
                 "ema20": tf.ema20,
                 "ema50": tf.ema50,

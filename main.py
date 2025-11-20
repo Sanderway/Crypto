@@ -21,7 +21,7 @@ def format_report(report) -> str:
         lines.append(f"最新标记价(实时): {report.mark_price:.4f}")
     for tf in report.timeframes:
         lines.append(
-            f"[{tf.interval}] 收盘价: {tf.close:.2f} | K线截止(UTC): {tf.close_time} | 趋势: {tf.trend}"
+            f"[{tf.interval}] 收盘价: {tf.close:.2f} | K线截止(UTC): {tf.close_time} | 本地: {tf.close_time_local} | 趋势: {tf.trend}"
         )
         lines.append(
             f"  EMA20/50/200: {tf.ema20:.2f} / {tf.ema50:.2f} / {tf.ema200:.2f} | SMA20/50: {tf.sma20} / {tf.sma50}"
