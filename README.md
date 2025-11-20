@@ -39,4 +39,6 @@ python main.py --symbols BTCUSDT ETHUSDT --intervals 1d 4h 1h 15m --limit 240
 
 ## 说明
 - 数据来源：币安合约 REST `/fapi/v1/klines`（USDT 永续）。
+- 收盘价来自“最近一根已收盘 K 线”，各周期的 `close_time (UTC)` 会在输出中体现；若需要接近实时价格，可参考输出顶部的“标记价”，该值来自 `/fapi/v1/premiumIndex`，并非持久订阅。
+- 当前实现不包含 WebSocket 推送，如需毫秒级行情可扩展 WebSocket 监听或自行传入最新成交价进行重算。
 - 该脚本仅供技术分析参考，不构成投资建议。

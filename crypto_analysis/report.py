@@ -33,6 +33,8 @@ def _safe_float(value: Any) -> Optional[float]:
 class TimeframeReport:
     interval: str
     close: float
+    close_time: pd.Timestamp
+    mark_price: Optional[float]
     ema20: float
     ema50: float
     ema200: float
@@ -66,6 +68,7 @@ class TimeframeReport:
 class SymbolReport:
     symbol: str
     timeframes: List[TimeframeReport]
+    mark_price: Optional[float]
     llm_prompt: str
 
 
@@ -75,14 +78,20 @@ class Analyzer:
 
     def analyze_symbol(self, symbol: str, intervals: List[str], limit: int = 240) -> SymbolReport:
         tf_reports: List[TimeframeReport] = []
+        mark_price: Optional[float] = None
+        try:
+            mark_price = self.client.fetch_mark_price(symbol)
+        except Exception:
+            mark_price = None
+
         for interval in intervals:
             df = self.client.fetch_klines(symbol, interval, limit=limit)
-            tf_reports.append(self._analyze_timeframe(df, symbol, interval))
+            tf_reports.append(self._analyze_timeframe(df, symbol, interval, mark_price=mark_price))
 
         prompt = self._build_llm_prompt(symbol, tf_reports)
-        return SymbolReport(symbol=symbol, timeframes=tf_reports, llm_prompt=prompt)
+        return SymbolReport(symbol=symbol, timeframes=tf_reports, mark_price=mark_price, llm_prompt=prompt)
 
-    def _analyze_timeframe(self, df: pd.DataFrame, symbol: str, interval: str) -> TimeframeReport:
+    def _analyze_timeframe(self, df: pd.DataFrame, symbol: str, interval: str, mark_price: Optional[float]) -> TimeframeReport:
         closes = df["close"]
         ema20 = indicators.ema(closes, 20)
         ema50 = indicators.ema(closes, 50)
@@ -103,6 +112,7 @@ class Analyzer:
 
         last_row = df.iloc[-1]
         price = float(last_row["close"])
+        close_time = pd.to_datetime(last_row["close_time"])
         ema20_val = float(ema20.iloc[-1])
         ema50_val = float(ema50.iloc[-1])
         ema200_val = float(ema200.iloc[-1])
@@ -149,12 +159,14 @@ class Analyzer:
             symbol=symbol,
             interval=interval,
             price=price,
+            close_time=close_time,
             trend=trend,
             support=support,
             resistance=resistance,
             fib_levels=fib_levels,
             pivot_levels=pivot_level,
             volume_profile=volume_profile,
+            mark_price=mark_price,
             ema20=ema20_val,
             ema50=ema50_val,
             ema200=ema200_val,
@@ -176,6 +188,8 @@ class Analyzer:
         return TimeframeReport(
             interval=interval,
             close=price,
+            close_time=close_time,
+            mark_price=mark_price,
             ema20=ema20_val,
             ema50=ema50_val,
             ema200=ema200_val,
@@ -321,12 +335,14 @@ class Analyzer:
         symbol: str,
         interval: str,
         price: float,
+        close_time: pd.Timestamp,
         trend: str,
         support: Optional[float],
         resistance: Optional[float],
         fib_levels: Optional[Dict[str, float]],
         pivot_levels: Optional[Dict[str, float]],
         volume_profile: Optional[Dict[str, float]],
+        mark_price: Optional[float],
         ema20: float,
         ema50: float,
         ema200: float,
@@ -364,7 +380,7 @@ class Analyzer:
                 "content": (
                     "你是一名数字货币技术分析助手。请基于给定的指标，用中文给出更细的操作建议，"
                     "包含潜在入场、止损和目标位，不要夸大收益，强调风险。"  # 指令
-                    f"\n币种: {symbol}, 周期: {interval}, 收盘: {price:.2f}, 趋势: {trend}"
+                    f"\n币种: {symbol}, 周期: {interval}, 收盘: {price:.2f} (K线截至UTC {close_time}), 标记价: {mark_price}, 趋势: {trend}"
                     f"\nEMA20/50/200: {ema20:.2f}/{ema50:.2f}/{ema200:.2f}, SMA20/50: {sma20} / {sma50}"
                     f"\nMACD: {macd:.4f} (signal {macd_signal:.4f}, hist {macd_hist:.4f}), RSI: {rsi:.2f}"
                     f"\nKDJ: {k} / {d} / {j}, ATR: {atr}, Boll 中轨: {boll_mid}, 上轨: {boll_upper}, 下轨: {boll_lower}"
@@ -394,7 +410,7 @@ class Analyzer:
             patterns = ",".join(tf.patterns) if tf.patterns else "无"
             lines.append(
                 (
-                    f"\n[周期 {tf.interval}] 收盘:{tf.close:.2f} 趋势:{tf.trend}"
+                    f"\n[周期 {tf.interval}] 收盘:{tf.close:.2f} (K线UTC:{tf.close_time}) 标记价:{tf.mark_price} 趋势:{tf.trend}"
                     f" | EMA20/50/200:{tf.ema20:.2f}/{tf.ema50:.2f}/{tf.ema200:.2f}"
                     f" | SMA20/50:{tf.sma20} / {tf.sma50}"
                     f" | MACD:{tf.macd:.4f}/{tf.macd_signal:.4f}/{tf.macd_histogram:.4f}"
@@ -416,6 +432,8 @@ def build_summary(reports: List[SymbolReport]) -> Dict[str, Dict[str, Dict[str, 
         for tf in report.timeframes:
             symbol_entry[tf.interval] = {
                 "close": tf.close,
+                "close_time": tf.close_time.isoformat(),
+                "mark_price": report.mark_price,
                 "ema20": tf.ema20,
                 "ema50": tf.ema50,
                 "ema200": tf.ema200,

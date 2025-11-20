@@ -4,6 +4,7 @@ import pandas as pd
 import requests
 
 BASE_URL = "https://fapi.binance.com/fapi/v1/klines"
+TICKER_URL = "https://fapi.binance.com/fapi/v1/premiumIndex"
 
 
 INTERVALS = {
@@ -54,5 +55,14 @@ class BinanceClient:
     def fetch_latest_close(self, symbol: str, interval: str) -> float:
         df = self.fetch_klines(symbol, interval, limit=2)
         return float(df["close"].iloc[-1])
+
+    def fetch_mark_price(self, symbol: str) -> float:
+        """Fetch the current mark price for a futures symbol (near real-time)."""
+
+        params = {"symbol": symbol.upper()}
+        response = self.session.get(TICKER_URL, params=params, timeout=5)
+        response.raise_for_status()
+        data = response.json()
+        return float(data["markPrice"])
 
 
