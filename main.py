@@ -1,7 +1,11 @@
 import argparse
+import os
+import sys
+import time
 from typing import List
 
 from crypto_analysis import Analyzer, BinanceClient, build_summary
+from crypto_analysis.notifier import call_ark, format_actions_for_alert, parse_actions, send_telegram_alert
 
 DEFAULT_SYMBOLS = ["BTCUSDT", "ETHUSDT"]
 DEFAULT_INTERVALS = ["1d", "4h", "1h", "15m"]
@@ -12,6 +16,19 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--symbols", nargs="*", default=DEFAULT_SYMBOLS, help="Symbols to analyze, default USDT pairs")
     parser.add_argument("--intervals", nargs="*", default=DEFAULT_INTERVALS, help="Intervals, e.g. 1d 4h 1h")
     parser.add_argument("--limit", type=int, default=240, help="Number of candles to fetch per timeframe")
+    parser.add_argument("--watch", action="store_true", help="Enable near-real-time polling loop")
+    parser.add_argument("--refresh-seconds", type=int, default=90, help="Polling interval when --watch is enabled")
+    parser.add_argument("--ark-api-key", default=os.environ.get("ARK_API_KEY"), help="Ark API key (or set ARK_API_KEY)")
+    parser.add_argument("--ark-model", default="doubao-seed-1-6-251015", help="Ark model name")
+    parser.add_argument("--ark-max-tokens", type=int, default=2048, help="Max completion tokens for Ark")
+    parser.add_argument(
+        "--ark-reasoning-effort",
+        default="medium",
+        choices=["low", "medium", "high"],
+        help="Reasoning effort for Ark completions",
+    )
+    parser.add_argument("--telegram-token", default=os.environ.get("TELEGRAM_BOT_TOKEN"), help="Telegram bot token")
+    parser.add_argument("--telegram-chat-id", default=os.environ.get("TELEGRAM_CHAT_ID"), help="Telegram chat id")
     return parser.parse_args()
 
 
@@ -60,15 +77,51 @@ def main() -> None:
     client = BinanceClient()
     analyzer = Analyzer(client)
 
-    reports = [analyzer.analyze_symbol(symbol, args.intervals, limit=args.limit) for symbol in args.symbols]
-    summary = build_summary(reports)
+    iteration = 0
+    while True:
+        iteration += 1
+        try:
+            reports = [analyzer.analyze_symbol(symbol, args.intervals, limit=args.limit) for symbol in args.symbols]
+        except Exception as exc:
+            print(f"分析失败: {exc}", file=sys.stderr)
+            if not args.watch:
+                raise
+            time.sleep(args.refresh_seconds)
+            continue
 
-    for report in reports:
-        print(format_report(report))
-        print()
+        summary = build_summary(reports)
 
-    print("汇总（可供 API/前端使用）:")
-    print(summary)
+        print(f"=== 轮询第 {iteration} 轮，UTC 时间 {time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime())} ===")
+        for report in reports:
+            print(format_report(report))
+            if args.ark_api_key:
+                try:
+                    response_text = call_ark(
+                        prompt=report.ark_prompt,
+                        api_key=args.ark_api_key,
+                        model=args.ark_model,
+                        max_tokens=args.ark_max_tokens,
+                        reasoning_effort=args.ark_reasoning_effort,
+                    )
+                    actions = parse_actions(response_text)
+                    if actions:
+                        alert_text = format_actions_for_alert(report.symbol, actions)
+                        print("AI操作建议(JSON):", actions)
+                        if args.telegram_token and args.telegram_chat_id and alert_text:
+                            send_telegram_alert(args.telegram_token, args.telegram_chat_id, alert_text)
+                            print("已发送 Telegram 警报")
+                    else:
+                        print("Ark 返回空/无效的 actions")
+                except Exception as exc:  # pragma: no cover - network errors
+                    print(f"Ark 调用失败: {exc}", file=sys.stderr)
+            print()
+
+        print("汇总（可供 API/前端使用）:")
+        print(summary)
+
+        if not args.watch:
+            break
+        time.sleep(args.refresh_seconds)
 
 
 if __name__ == "__main__":

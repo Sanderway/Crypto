@@ -72,6 +72,7 @@ class SymbolReport:
     timeframes: List[TimeframeReport]
     mark_price: Optional[float]
     llm_prompt: str
+    ark_prompt: str
 
 
 class Analyzer:
@@ -91,7 +92,14 @@ class Analyzer:
             tf_reports.append(self._analyze_timeframe(df, symbol, interval, mark_price=mark_price))
 
         prompt = self._build_llm_prompt(symbol, tf_reports)
-        return SymbolReport(symbol=symbol, timeframes=tf_reports, mark_price=mark_price, llm_prompt=prompt)
+        ark_prompt = self._build_ark_prompt(symbol, tf_reports)
+        return SymbolReport(
+            symbol=symbol,
+            timeframes=tf_reports,
+            mark_price=mark_price,
+            llm_prompt=prompt,
+            ark_prompt=ark_prompt,
+        )
 
     def _analyze_timeframe(self, df: pd.DataFrame, symbol: str, interval: str, mark_price: Optional[float]) -> TimeframeReport:
         closes = df["close"]
@@ -429,6 +437,32 @@ class Analyzer:
             )
         return "\n".join(lines)
 
+    def _build_ark_prompt(self, symbol: str, reports: List[TimeframeReport]) -> str:
+        lines: List[str] = [
+            "请输出 JSON，不要包含额外文字。字段: actions 数组，每项包含 timeframe, bias(多/空/观望), entry, stop, targets 数组, confidence(0-100), note。",
+            "若无明确信号，请给出空数组。",
+            f"标的: {symbol} (Binance USDT 永续)",
+        ]
+        for tf in reports:
+            fib_text = ", ".join([f"{k}:{v:.2f}" for k, v in (tf.fib_levels or {}).items()]) or "无"
+            pivot_text = ", ".join([f"{k}:{v:.2f}" for k, v in (tf.pivot_levels or {}).items()]) or "无"
+            vp_text = ", ".join([f"{k}:{v:.2f}" for k, v in (tf.volume_profile or {}).items()]) or "无"
+            lines.append(
+                (
+                    f"\n[周期 {tf.interval}] 收盘:{tf.close:.2f} (UTC:{tf.close_time}) 标记价:{tf.mark_price} 趋势:{tf.trend}"
+                    f" | EMA20/50/200:{tf.ema20:.2f}/{tf.ema50:.2f}/{tf.ema200:.2f}"
+                    f" | SMA20/50:{tf.sma20} / {tf.sma50}"
+                    f" | MACD:{tf.macd:.4f}/{tf.macd_signal:.4f}/{tf.macd_histogram:.4f}"
+                    f" | RSI:{tf.rsi:.2f} | KDJ:{tf.kdj_k}/{tf.kdj_d}/{tf.kdj_j}"
+                    f" | Boll:{tf.boll_lower}/{tf.boll_mid}/{tf.boll_upper} | ATR:{tf.atr}"
+                    f" | 支撑/阻力:{tf.support}/{tf.resistance} | Pivot:{pivot_text}"
+                    f" | 斐波:{fib_text} | 成交量均线:{tf.vma20}/{tf.vma50} | VP:{vp_text}"
+                    f" | 形态:{','.join(tf.patterns) if tf.patterns else '无'}"
+                    f" | 初步建议:{tf.suggestion}"
+                )
+            )
+        return "\n".join(lines)
+
 
 def build_summary(reports: List[SymbolReport]) -> Dict[str, Dict[str, Dict[str, Union[float, str, None, Dict[str, float], List[str]]]]]:
     summary: Dict[str, Dict[str, Dict[str, Union[float, str, None, Dict[str, float], List[str]]]]] = {}
@@ -469,5 +503,6 @@ def build_summary(reports: List[SymbolReport]) -> Dict[str, Dict[str, Dict[str, 
                 "llm_note": tf.llm_note,
             }
         symbol_entry["llm_prompt"] = {"prompt": report.llm_prompt}
+        symbol_entry["ark_prompt"] = {"prompt": report.ark_prompt}
         summary[report.symbol] = symbol_entry
     return summary
