@@ -1,14 +1,15 @@
 import argparse
+import json
 import os
 import sys
 import time
 from typing import List
 
 from crypto_analysis import Analyzer, BinanceClient, build_summary
-from crypto_analysis.notifier import call_ark, format_actions_for_alert, parse_actions, send_telegram_alert
+from crypto_analysis.notifier import call_ark, parse_actions, send_telegram_alert
 
 DEFAULT_SYMBOLS = ["BTCUSDT", "ETHUSDT"]
-DEFAULT_INTERVALS = ["1d", "4h", "1h", "15m"]
+DEFAULT_INTERVALS = ["1d", "4h", "1h"]
 
 
 def parse_args() -> argparse.Namespace:
@@ -40,7 +41,7 @@ def parse_args() -> argparse.Namespace:
 def _fallback_actions(report) -> List[dict]:
     """Create a single conservative action when LLM returns empty."""
 
-    preferred_order = {"1h": 0, "15m": 1, "4h": 2, "1d": 3}
+    preferred_order = {"4h": 0, "1h": 1, "1d": 2, "15m": 3}
     sorted_tfs = sorted(report.timeframes, key=lambda tf: preferred_order.get(tf.interval, 99))
     tf = sorted_tfs[0]
     bias_map = {"bullish": "多", "bearish": "空", "sideways": "观望"}
@@ -162,8 +163,9 @@ def main() -> None:
                         actions = _fallback_actions(report)
                         print("Ark 返回空/无效的 actions，已用本地策略生成兜底建议")
 
-                    alert_text = format_actions_for_alert(report.symbol, actions)
+                    alert_text = response_text if actions and response_text else json.dumps({"actions": actions}, ensure_ascii=False)
                     print("AI操作建议(JSON):", actions)
+                    print("AI原始回复:", response_text)
                     if args.telegram_token and args.telegram_chat_id and alert_text:
                         send_telegram_alert(args.telegram_token, args.telegram_chat_id, alert_text)
                         print("已发送 Telegram 警报")
