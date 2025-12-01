@@ -16,8 +16,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--symbols", nargs="*", default=DEFAULT_SYMBOLS, help="Symbols to analyze, default USDT pairs")
     parser.add_argument("--intervals", nargs="*", default=DEFAULT_INTERVALS, help="Intervals, e.g. 1d 4h 1h")
     parser.add_argument("--limit", type=int, default=240, help="Number of candles to fetch per timeframe")
-    parser.add_argument("--watch", action="store_true", help="Enable near-real-time polling loop")
-    parser.add_argument("--refresh-seconds", type=int, default=90, help="Polling interval when --watch is enabled")
+    parser.add_argument("--watch", action="store_true", help="Enable periodic polling loop (默认以小时级为周期)")
+    parser.add_argument(
+        "--refresh-seconds",
+        type=int,
+        default=3600,
+        help="Polling interval when --watch is enabled; 建议 3600 秒或 14400 秒以匹配 1h/4h 级别中长线节奏",
+    )
     parser.add_argument("--ark-api-key", default=os.environ.get("ARK_API_KEY"), help="Ark API key (or set ARK_API_KEY)")
     parser.add_argument("--ark-model", default="doubao-seed-1-6-251015", help="Ark model name")
     parser.add_argument("--ark-max-tokens", type=int, default=2048, help="Max completion tokens for Ark")
@@ -30,6 +35,49 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--telegram-token", default=os.environ.get("TELEGRAM_BOT_TOKEN"), help="Telegram bot token")
     parser.add_argument("--telegram-chat-id", default=os.environ.get("TELEGRAM_CHAT_ID"), help="Telegram chat id")
     return parser.parse_args()
+
+
+def _fallback_actions(report) -> List[dict]:
+    """Create a single conservative action when LLM returns empty."""
+
+    preferred_order = {"1h": 0, "15m": 1, "4h": 2, "1d": 3}
+    sorted_tfs = sorted(report.timeframes, key=lambda tf: preferred_order.get(tf.interval, 99))
+    tf = sorted_tfs[0]
+    bias_map = {"bullish": "多", "bearish": "空", "sideways": "观望"}
+    bias = bias_map.get(tf.trend, "观望")
+
+    entry = tf.mark_price if tf.mark_price is not None else tf.close
+    stop = None
+    targets: List[float] = []
+
+    if bias == "多":
+        stop = tf.support - tf.atr if tf.support is not None and tf.atr is not None else tf.support
+        if tf.resistance is not None:
+            targets.append(tf.resistance)
+        if tf.fib_levels and tf.fib_levels.get("0.618"):
+            targets.append(tf.fib_levels["0.618"])
+    elif bias == "空":
+        stop = tf.resistance + tf.atr if tf.resistance is not None and tf.atr is not None else tf.resistance
+        if tf.support is not None:
+            targets.append(tf.support)
+        if tf.fib_levels and tf.fib_levels.get("0.382"):
+            targets.append(tf.fib_levels["0.382"])
+    else:
+        stop = tf.support if tf.support is not None else tf.resistance
+        if tf.support is not None and tf.resistance is not None:
+            targets.extend([tf.support, tf.resistance])
+
+    return [
+        {
+            "timeframe": tf.interval,
+            "bias": bias,
+            "entry": entry,
+            "stop": stop,
+            "targets": targets,
+            "confidence": 55 if bias != "观望" else 40,
+            "note": f"LLM 未返回 actions，使用本地初步建议生成。初步建议: {tf.suggestion}",
+        }
+    ]
 
 
 def format_report(report) -> str:
@@ -77,6 +125,12 @@ def main() -> None:
     client = BinanceClient()
     analyzer = Analyzer(client)
 
+    # 为中长线节奏设置一个合理的最小轮询周期，避免高频调用浪费 Token。
+    min_refresh = 900  # 15 分钟下限，仅防误设置；推荐 3600s 或 14400s
+    refresh_seconds = max(args.refresh_seconds, min_refresh)
+    if args.watch and refresh_seconds != args.refresh_seconds:
+        print(f"已将轮询周期提升至 {refresh_seconds} 秒以避免过高频率")
+
     iteration = 0
     while True:
         iteration += 1
@@ -86,7 +140,7 @@ def main() -> None:
             print(f"分析失败: {exc}", file=sys.stderr)
             if not args.watch:
                 raise
-            time.sleep(args.refresh_seconds)
+            time.sleep(refresh_seconds)
             continue
 
         summary = build_summary(reports)
@@ -104,14 +158,15 @@ def main() -> None:
                         reasoning_effort=args.ark_reasoning_effort,
                     )
                     actions = parse_actions(response_text)
-                    if actions:
-                        alert_text = format_actions_for_alert(report.symbol, actions)
-                        print("AI操作建议(JSON):", actions)
-                        if args.telegram_token and args.telegram_chat_id and alert_text:
-                            send_telegram_alert(args.telegram_token, args.telegram_chat_id, alert_text)
-                            print("已发送 Telegram 警报")
-                    else:
-                        print("Ark 返回空/无效的 actions")
+                    if not actions:
+                        actions = _fallback_actions(report)
+                        print("Ark 返回空/无效的 actions，已用本地策略生成兜底建议")
+
+                    alert_text = format_actions_for_alert(report.symbol, actions)
+                    print("AI操作建议(JSON):", actions)
+                    if args.telegram_token and args.telegram_chat_id and alert_text:
+                        send_telegram_alert(args.telegram_token, args.telegram_chat_id, alert_text)
+                        print("已发送 Telegram 警报")
                 except Exception as exc:  # pragma: no cover - network errors
                     print(f"Ark 调用失败: {exc}", file=sys.stderr)
             print()
@@ -121,7 +176,7 @@ def main() -> None:
 
         if not args.watch:
             break
-        time.sleep(args.refresh_seconds)
+        time.sleep(refresh_seconds)
 
 
 if __name__ == "__main__":

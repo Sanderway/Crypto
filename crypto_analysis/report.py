@@ -412,26 +412,26 @@ class Analyzer:
 
     def _build_llm_prompt(self, symbol: str, reports: List[TimeframeReport]) -> str:
         lines: List[str] = [
-            "你是一名数字货币分析师，请根据以下多周期指标和初步建议，输出更细的交易计划（入场条件、止损、分批减仓/目标位），并强调风险与仓位控制。",
-            "禁止提供投资承诺，保持客观。",
+            "你是一名数字货币分析师，请基于下列多周期要点给出可执行的中短线计划（入场/止损/分批止盈），并强调风险。",
+            "仅输出中文文字，可酌情给出观望策略，但不要省略操作要点。",
             f"标的: {symbol} (币安USDT永续合约)",
+            "重点：日/4H用于大趋势，1H/15M用于执行；若无把握，给出观望与关键水平。",
         ]
         for tf in reports:
-            fib_text = ", ".join([f"{k}:{v:.2f}" for k, v in (tf.fib_levels or {}).items()]) or "无"
-            pivot_text = ", ".join([f"{k}:{v:.2f}" for k, v in (tf.pivot_levels or {}).items()]) or "无"
-            vp_text = ", ".join([f"{k}:{v:.2f}" for k, v in (tf.volume_profile or {}).items()]) or "无"
+            fib_core = {k: v for k, v in (tf.fib_levels or {}).items() if k in {"0.382", "0.618"}}
+            fib_text = ", ".join([f"{k}:{v:.2f}" for k, v in fib_core.items()]) or "无"
+            pivot_core = {k: tf.pivot_levels.get(k) for k in (tf.pivot_levels or {}) if k in {"pivot", "r1", "s1"}} if tf.pivot_levels else {}
+            pivot_text = ", ".join([f"{k}:{v:.2f}" for k, v in pivot_core.items()]) or "无"
+            vp_core = {k: tf.volume_profile.get(k) for k in (tf.volume_profile or {}) if k in {"hvn", "lvn"}} if tf.volume_profile else {}
+            vp_text = ", ".join([f"{k}:{v:.2f}" for k, v in vp_core.items()]) or "无"
             patterns = ",".join(tf.patterns) if tf.patterns else "无"
             lines.append(
                 (
-                    f"\n[周期 {tf.interval}] 收盘:{tf.close:.2f} (K线UTC:{tf.close_time}, 本地:{tf.close_time_local}) 标记价:{tf.mark_price} 趋势:{tf.trend}"
+                    f"\n[{tf.interval}] 收盘:{tf.close:.2f} (UTC:{tf.close_time}, 本地:{tf.close_time_local}) 标记价:{tf.mark_price} 趋势:{tf.trend}"
                     f" | EMA20/50/200:{tf.ema20:.2f}/{tf.ema50:.2f}/{tf.ema200:.2f}"
-                    f" | SMA20/50:{tf.sma20} / {tf.sma50}"
-                    f" | MACD:{tf.macd:.4f}/{tf.macd_signal:.4f}/{tf.macd_histogram:.4f}"
-                    f" | RSI:{tf.rsi:.2f} | KDJ:{tf.kdj_k}/{tf.kdj_d}/{tf.kdj_j}"
-                    f" | Boll:{tf.boll_lower}/{tf.boll_mid}/{tf.boll_upper} | ATR:{tf.atr}"
-                    f" | 支撑/阻力:{tf.support}/{tf.resistance} | Pivot:{pivot_text}"
-                    f" | 斐波:{fib_text} | 成交量均线:{tf.vma20}/{tf.vma50} | VP:{vp_text}"
-                    f" | 形态:{patterns}"
+                    f" | MACD:{tf.macd:.3f}/{tf.macd_signal:.3f}/{tf.macd_histogram:.3f} | RSI:{tf.rsi:.2f} | ATR:{tf.atr}"
+                    f" | 支撑/阻力:{tf.support}/{tf.resistance} | Pivot:{pivot_text} | 斐波核心:{fib_text}"
+                    f" | VP(HVN/LVN):{vp_text} | 形态:{patterns}"
                     f" | 初步建议:{tf.suggestion}"
                 )
             )
@@ -440,24 +440,23 @@ class Analyzer:
     def _build_ark_prompt(self, symbol: str, reports: List[TimeframeReport]) -> str:
         lines: List[str] = [
             "请输出 JSON，不要包含额外文字。字段: actions 数组，每项包含 timeframe, bias(多/空/观望), entry, stop, targets 数组, confidence(0-100), note。",
-            "若无明确信号，请给出空数组。",
+            "必须至少返回一条 actions；若趋势不明，请给出观望方案并标明关键支撑/阻力。",
             f"标的: {symbol} (Binance USDT 永续)",
         ]
         for tf in reports:
-            fib_text = ", ".join([f"{k}:{v:.2f}" for k, v in (tf.fib_levels or {}).items()]) or "无"
-            pivot_text = ", ".join([f"{k}:{v:.2f}" for k, v in (tf.pivot_levels or {}).items()]) or "无"
-            vp_text = ", ".join([f"{k}:{v:.2f}" for k, v in (tf.volume_profile or {}).items()]) or "无"
+            fib_core = {k: v for k, v in (tf.fib_levels or {}).items() if k in {"0.382", "0.618"}}
+            fib_text = ", ".join([f"{k}:{v:.2f}" for k, v in fib_core.items()]) or "无"
+            pivot_core = {k: tf.pivot_levels.get(k) for k in (tf.pivot_levels or {}) if k in {"pivot", "r1", "s1"}} if tf.pivot_levels else {}
+            pivot_text = ", ".join([f"{k}:{v:.2f}" for k, v in pivot_core.items()]) or "无"
+            vp_core = {k: tf.volume_profile.get(k) for k in (tf.volume_profile or {}) if k in {"hvn", "lvn"}} if tf.volume_profile else {}
+            vp_text = ", ".join([f"{k}:{v:.2f}" for k, v in vp_core.items()]) or "无"
             lines.append(
                 (
-                    f"\n[周期 {tf.interval}] 收盘:{tf.close:.2f} (UTC:{tf.close_time}) 标记价:{tf.mark_price} 趋势:{tf.trend}"
+                    f"\n[{tf.interval}] close:{tf.close:.2f} UTC:{tf.close_time} mark:{tf.mark_price} trend:{tf.trend}"
                     f" | EMA20/50/200:{tf.ema20:.2f}/{tf.ema50:.2f}/{tf.ema200:.2f}"
-                    f" | SMA20/50:{tf.sma20} / {tf.sma50}"
-                    f" | MACD:{tf.macd:.4f}/{tf.macd_signal:.4f}/{tf.macd_histogram:.4f}"
-                    f" | RSI:{tf.rsi:.2f} | KDJ:{tf.kdj_k}/{tf.kdj_d}/{tf.kdj_j}"
-                    f" | Boll:{tf.boll_lower}/{tf.boll_mid}/{tf.boll_upper} | ATR:{tf.atr}"
-                    f" | 支撑/阻力:{tf.support}/{tf.resistance} | Pivot:{pivot_text}"
-                    f" | 斐波:{fib_text} | 成交量均线:{tf.vma20}/{tf.vma50} | VP:{vp_text}"
-                    f" | 形态:{','.join(tf.patterns) if tf.patterns else '无'}"
+                    f" | MACD:{tf.macd:.3f}/{tf.macd_signal:.3f}/{tf.macd_histogram:.3f} | RSI:{tf.rsi:.2f} | ATR:{tf.atr}"
+                    f" | SR:{tf.support}/{tf.resistance} | Pivot:{pivot_text} | Fib:{fib_text}"
+                    f" | VP(HVN/LVN):{vp_text} | Patterns:{','.join(tf.patterns) if tf.patterns else '无'}"
                     f" | 初步建议:{tf.suggestion}"
                 )
             )

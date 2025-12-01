@@ -10,6 +10,7 @@ def build_ark_messages(prompt: str) -> List[Dict[str, Any]]:
     system_text = (
         "你是量化交易与风控助手，仅输出 JSON。"
         "JSON 字段: actions 数组，每项包含 timeframe, bias(多/空/观望), entry, stop, targets 数组, confidence(0-100), note。"
+        "必须至少输出 1 条 actions；若无信号，也需给出观望方案并标注关键支撑/阻力。"
         "禁止输出除 JSON 外的文字。"
     )
     return [
